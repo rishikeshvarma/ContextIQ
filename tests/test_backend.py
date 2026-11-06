@@ -1,4 +1,4 @@
-"""Backend tests. Gemini, Discord, Hugging Face and Supabase are all faked,
+"""Backend tests. Gemini, Discord and Supabase are all faked,
 so these need no keys and no network."""
 import unittest
 from unittest import mock
@@ -6,6 +6,9 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 import new_backend
+
+
+AUDIO = b"RIFF fake wav bytes"
 
 
 def fake_gemini(text="hello back"):
@@ -97,20 +100,20 @@ class BackendTest(unittest.TestCase):
 
     def test_transcribe_sends_the_audio_to_gemini(self):
         with fake_gemini("spoken") as model:
-            res = self.client.post("/transcribe", files={"file": ("a.wav", b"audio", "audio/wav")})
+            res = self.client.post("/transcribe", files={"file": ("a.wav", AUDIO, "audio/wav")})
         self.assertEqual(res.json(), {"text": "spoken"})
         audio = model.return_value.generate_content.call_args.args[0][1]
-        self.assertEqual(audio, {"mime_type": "audio/wav", "data": b"audio"})
+        self.assertEqual(audio, {"mime_type": "audio/wav", "data": AUDIO})
 
     def test_transcribe_upload_says_when_nothing_was_stored(self):
         with fake_gemini("spoken"), mock.patch.object(new_backend, "supabase", None):
-            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", b"audio")})
+            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", AUDIO)})
         self.assertEqual(res.json()["status"], "not stored")
 
     def test_transcribe_upload_stores_the_text(self):
         db = mock.Mock()
         with fake_gemini("spoken"), mock.patch.object(new_backend, "supabase", db):
-            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", b"audio")})
+            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", AUDIO)})
         self.assertEqual(res.json()["status"], "stored in db")
         db.table.return_value.insert.assert_called_with({"transcript": "spoken"})
 
@@ -124,13 +127,28 @@ class TranscribeFailureTest(unittest.TestCase):
 
     def test_gemini_failure_is_a_clear_error(self):
         with mock.patch.object(new_backend.genai, "GenerativeModel", side_effect=RuntimeError("secret detail")):
-            res = self.client.post("/transcribe", files={"file": ("a.wav", b"audio")})
+            res = self.client.post("/transcribe", files={"file": ("a.wav", AUDIO)})
         self.assertEqual(res.status_code, 502)
         self.assertEqual(res.json()["error"], "Gemini could not transcribe this audio")
 
+    def test_non_audio_never_reaches_gemini(self):
+        with fake_gemini() as model:
+            res = self.client.post("/transcribe", files={"file": ("a.mp3", b"not audio")})
+        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.json()["error"], "this file does not look like audio")
+        model.assert_not_called()
+
+    def test_no_speech_is_not_stored_as_a_transcript(self):
+        db = mock.Mock()
+        with fake_gemini(new_backend.NO_SPEECH), mock.patch.object(new_backend, "supabase", db):
+            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", AUDIO)})
+        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.json()["error"], "no speech found in this audio")
+        db.table.assert_not_called()
+
     def test_too_large_audio_is_refused_before_calling_gemini(self):
         with mock.patch.object(new_backend, "MAX_AUDIO_BYTES", 2), fake_gemini() as model:
-            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", b"audio")})
+            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", AUDIO)})
         self.assertEqual(res.status_code, 502)
         self.assertEqual(res.json()["status"], "not stored")
         model.assert_not_called()

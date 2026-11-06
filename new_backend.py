@@ -265,19 +265,34 @@ def chat_db(payload: TextIn):
 # -----------------------------------------------------
 # Gemini takes inline audio up to about 20 MB per request.
 MAX_AUDIO_BYTES = 19 * 1024 * 1024
-TRANSCRIBE_PROMPT = "Transcribe this audio word for word. Return only the transcript, with no commentary."
+NO_SPEECH = "NO_SPEECH"
+TRANSCRIBE_PROMPT = ("Transcribe the speech in this audio word for word. Return only the transcript, "
+                     f"with no commentary. If there is no clear speech, return exactly {NO_SPEECH}. "
+                     "Never guess or invent words.")
+
+
+def _looks_like_audio(data: bytes) -> bool:
+    """Checks the file's opening bytes, because Gemini invents a transcript for non-audio."""
+    return (data[:4] in (b"RIFF", b"OggS", b"fLaC", b"FORM")   # wav, ogg, flac, aiff
+            or data[:3] == b"ID3" or data[4:8] == b"ftyp"      # mp3 with tags, m4a
+            or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0))  # mp3, aac
 
 
 def _gemini_transcribe(file: UploadFile, audio_bytes: bytes):
     """Returns (text, None), or (None, a reason safe to show the caller)."""
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         return None, "audio is larger than 19 MB"
+    if not _looks_like_audio(audio_bytes):
+        return None, "this file does not look like audio"
     try:
         response = genai.GenerativeModel("gemini-2.5-flash").generate_content([
             TRANSCRIBE_PROMPT,
             {"mime_type": file.content_type or "audio/wav", "data": audio_bytes},
         ])
-        return response.text.strip(), None
+        text = response.text.strip()
+        if text == NO_SPEECH:
+            return None, "no speech found in this audio"
+        return text, None
     except Exception as e:
         logger.warning("Gemini transcription failed: %s", type(e).__name__)
         return None, "Gemini could not transcribe this audio"
