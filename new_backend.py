@@ -1,17 +1,14 @@
 import os
-import io
 import time
 import threading
 import logging
 from typing import List, Optional
 
-import torch
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 import requests
 import google.generativeai as genai
-import soundfile as sf
 from dotenv import load_dotenv
 
 # -----------------------------------------------------
@@ -19,7 +16,6 @@ from dotenv import load_dotenv
 # -----------------------------------------------------
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
 
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
@@ -40,14 +36,6 @@ try:
     genai.configure(api_key=GEMINI_API_KEY)
 except Exception as e:
     logger.warning("Could not configure Gemini: %s", e)
-
-# whisper (local)
-import whisper
-try:
-    whisper_model = whisper.load_model(WHISPER_MODEL)
-except Exception as e:
-    logger.warning("Whisper model load failed: %s", e)
-    whisper_model = None
 
 # -----------------------------------------------------
 # FASTAPI
@@ -252,31 +240,6 @@ async def transcribe_and_store(file: UploadFile = File(...)):
         except Exception as e:
             logger.warning("Failed to store transcript: %s", e)
 
-    return {"text": text, "status": "stored in db"}
-# -----------------------------------------------------
-@app.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
-    audio_bytes = await file.read()
-    audio, sr = sf.read(io.BytesIO(audio_bytes))
-    if whisper_model is None:
-        return {"error": "Whisper model not available"}
-    result = whisper_model.transcribe(audio)
-    return {"text": result.get("text")}
-
-
-@app.post("/transcribe_upload")
-async def transcribe_and_store(file: UploadFile = File(...)):
-    audio_bytes = await file.read()
-    audio, sr = sf.read(io.BytesIO(audio_bytes))
-    if whisper_model is None:
-        return {"error": "Whisper model not available"}
-    result = whisper_model.transcribe(audio)
-    text = result.get("text")
-    if supabase:
-        try:
-            supabase.table("audio_transcripts").insert({"transcript": text}).execute()
-        except Exception as e:
-            logger.warning("Failed to store transcript: %s", e)
     return {"text": text, "status": "stored in db"}
 
 # -----------------------------------------------------
