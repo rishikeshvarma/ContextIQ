@@ -2,7 +2,7 @@
 
 A FastAPI backend that collects a team's Discord messages into Supabase and
 uses Gemini to chat, classify messages and pull out tasks, decisions and
-deadlines. It also transcribes audio through the Hugging Face API.
+deadlines. It also transcribes audio through Gemini, up to 19 MB per file.
 
 ## Run it
 

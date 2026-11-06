@@ -261,33 +261,31 @@ def chat_db(payload: TextIn):
     return chat(payload)
 
 # -----------------------------------------------------
-# TRANSCRIBE (HuggingFace Whisper-small API) + upload
+# TRANSCRIBE (Gemini audio) + upload
 # -----------------------------------------------------
-HF_API_KEY = os.getenv("HF_API_KEY")
-HF_WHISPER_MODEL = os.getenv("HF_WHISPER_MODEL", "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3")
+# Gemini takes inline audio up to about 20 MB per request.
+MAX_AUDIO_BYTES = 19 * 1024 * 1024
+TRANSCRIBE_PROMPT = "Transcribe this audio word for word. Return only the transcript, with no commentary."
 
 
-def _hf_transcribe(file: UploadFile, audio_bytes: bytes):
+def _gemini_transcribe(file: UploadFile, audio_bytes: bytes):
     """Returns (text, None), or (None, a reason safe to show the caller)."""
-    headers = {"Authorization": f"Bearer {HF_API_KEY}",
-               "Content-Type": file.content_type or "audio/wav"}
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        return None, "audio is larger than 19 MB"
     try:
-        res = requests.post(HF_WHISPER_MODEL, headers=headers, data=audio_bytes, timeout=120)
-    except requests.RequestException as e:
-        logger.warning("Hugging Face request failed: %s", type(e).__name__)
-        return None, "could not reach Hugging Face"
-    if not res.ok:
-        logger.warning("Hugging Face answered %s", res.status_code)
-        return None, f"Hugging Face answered {res.status_code}"
-    try:
-        return res.json().get("text"), None
-    except ValueError:
-        return None, "Hugging Face sent an unreadable answer"
+        response = genai.GenerativeModel("gemini-2.5-flash").generate_content([
+            TRANSCRIBE_PROMPT,
+            {"mime_type": file.content_type or "audio/wav", "data": audio_bytes},
+        ])
+        return response.text.strip(), None
+    except Exception as e:
+        logger.warning("Gemini transcription failed: %s", type(e).__name__)
+        return None, "Gemini could not transcribe this audio"
 
 
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    text, error = _hf_transcribe(file, await file.read())
+    text, error = _gemini_transcribe(file, await file.read())
     if error:
         return JSONResponse({"text": None, "error": error}, status_code=502)
     return {"text": text}
@@ -295,7 +293,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
 @app.post("/transcribe_upload")
 async def transcribe_and_store(file: UploadFile = File(...)):
-    text, error = _hf_transcribe(file, await file.read())
+    text, error = _gemini_transcribe(file, await file.read())
     if error:
         return JSONResponse({"text": None, "status": "not stored", "error": error}, status_code=502)
 
