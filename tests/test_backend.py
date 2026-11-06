@@ -17,8 +17,11 @@ def fake_gemini(text="hello back"):
 class BackendTest(unittest.TestCase):
     def setUp(self):
         # Not used as a context manager, so the startup sync thread stays off.
-        self.client = TestClient(new_backend.app)
+        self.client = TestClient(new_backend.app, headers={"X-API-Key": "test-key"})
         new_backend.chat_memory.clear()
+        patcher = mock.patch.object(new_backend, "API_KEY", "test-key")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_health(self):
         self.assertEqual(self.client.get("/health").json(), {"ok": True})
@@ -105,6 +108,39 @@ class BackendTest(unittest.TestCase):
                 mock.patch.object(new_backend, "supabase", None):
             res = self.client.post("/transcribe_upload", files={"file": ("a.wav", b"audio")})
         self.assertEqual(res.json()["status"], "not stored")
+
+
+class AccessTest(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(new_backend.app, follow_redirects=False)
+
+    def test_missing_or_wrong_key_is_refused(self):
+        with mock.patch.object(new_backend, "API_KEY", "test-key"):
+            self.assertEqual(self.client.get("/discord/connected").status_code, 401)
+            res = self.client.get("/discord/connected", headers={"X-API-Key": "nope"})
+            self.assertEqual(res.status_code, 401)
+            self.assertEqual(self.client.post("/discord/sync/1").status_code, 401)
+
+    def test_right_key_is_let_in(self):
+        with mock.patch.object(new_backend, "API_KEY", "test-key"), \
+                mock.patch.object(new_backend, "supabase", None):
+            res = self.client.get("/discord/connected", headers={"X-API-Key": "test-key"})
+        self.assertEqual(res.json(), {"connected": []})
+
+    def test_locked_when_no_key_is_configured(self):
+        with mock.patch.object(new_backend, "API_KEY", None):
+            self.assertEqual(self.client.get("/discord/connected").status_code, 503)
+
+    def test_connect_flow_pages_stay_public(self):
+        with mock.patch.object(new_backend, "API_KEY", "test-key"):
+            self.assertEqual(self.client.get("/health").status_code, 200)
+            self.assertEqual(self.client.get("/discord/login").status_code, 307)
+            self.assertEqual(self.client.get("/discord/no_admin_guild").status_code, 200)
+
+    def test_bot_is_not_invited_as_admin(self):
+        with mock.patch.object(new_backend, "API_KEY", "test-key"):
+            res = self.client.get("/discord/guild/1/authorize_bot")
+        self.assertIn("permissions=66560", res.headers["location"])
 
 
 if __name__ == "__main__":

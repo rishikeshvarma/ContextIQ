@@ -1,11 +1,13 @@
+import hmac
 import os
+import re
 import time
 import threading
 import logging
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, UploadFile, File, BackgroundTasks
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 import requests
 import google.generativeai as genai
@@ -41,6 +43,30 @@ except Exception as e:
 # FASTAPI
 # -----------------------------------------------------
 app = FastAPI(title="MAX Intelligent System")
+
+# -----------------------------------------------------
+# ACCESS: every route needs the X-API-Key header, except the pages a browser
+# has to reach during the Discord connect flow. No API_KEY set means locked.
+# -----------------------------------------------------
+API_KEY = os.getenv("API_KEY")
+PUBLIC_PATHS = {"/health", "/discord/login", "/oauth/discord/callback",
+                "/discord/bot_success", "/discord/no_admin_guild"}
+PUBLIC_PATH_PATTERN = re.compile(r"^/discord/guild/[^/]+/authorize_bot$")
+# VIEW_CHANNEL (1024) + READ_MESSAGE_HISTORY (65536): all the sync needs.
+BOT_PERMISSIONS = 66560
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    path = request.url.path
+    if path in PUBLIC_PATHS or PUBLIC_PATH_PATTERN.match(path):
+        return await call_next(request)
+    if not API_KEY:
+        return JSONResponse({"error": "API_KEY is not set on the server"}, status_code=503)
+    given = request.headers.get("x-api-key", "")
+    if not hmac.compare_digest(given.encode(), API_KEY.encode()):
+        return JSONResponse({"error": "missing or wrong X-API-Key"}, status_code=401)
+    return await call_next(request)
 
 # -----------------------------------------------------
 # SUPABASE CLIENT
@@ -340,7 +366,7 @@ def discord_callback(code: str):
         f"?client_id={DISCORD_CLIENT_ID}"
         "&scope=bot%20applications.commands"
         f"&guild_id={selected_guild_id}"
-        "&permissions=8"
+        f"&permissions={BOT_PERMISSIONS}"
         f"&redirect_uri={DISCORD_REDIRECT_URI}"
     )
     return RedirectResponse(bot_auth_url)
@@ -353,7 +379,7 @@ def authorize_bot(guild_id: str):
         f"?client_id={DISCORD_CLIENT_ID}"
         "&scope=bot%20applications.commands"
         f"&guild_id={guild_id}"
-        "&permissions=8"
+        f"&permissions={BOT_PERMISSIONS}"
         f"&redirect_uri={DISCORD_REDIRECT_URI}"
     )
     return RedirectResponse(bot_oauth)

@@ -14,6 +14,12 @@ deadlines. It also transcribes audio through the Hugging Face API.
 5. `uvicorn new_backend:app --reload`, then open `/discord/login` to connect a
    server you administer.
 
+## Access
+
+Send your `API_KEY` as the `X-API-Key` header on every request. Only `/health`
+and the pages a browser needs to connect Discord are public. The bot asks only
+to view channels and read message history.
+
 ## Tests
 
 `python -m unittest discover -t . -s tests`
