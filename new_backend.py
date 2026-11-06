@@ -165,7 +165,7 @@ Return JSON:
 def embed(payload: TextIn):
     try:
         embedding = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/gemini-embedding-001",
             content=payload.text
         )
         return {"embedding": embedding['embedding']}
@@ -264,28 +264,40 @@ def chat_db(payload: TextIn):
 # TRANSCRIBE (HuggingFace Whisper-small API) + upload
 # -----------------------------------------------------
 HF_API_KEY = os.getenv("HF_API_KEY")
-HF_WHISPER_MODEL = os.getenv("HF_WHISPER_MODEL", "https://api-inference.huggingface.co/models/openai/whisper-small")
+HF_WHISPER_MODEL = os.getenv("HF_WHISPER_MODEL", "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3")
+
+
+def _hf_transcribe(file: UploadFile, audio_bytes: bytes):
+    """Returns (text, None), or (None, a reason safe to show the caller)."""
+    headers = {"Authorization": f"Bearer {HF_API_KEY}",
+               "Content-Type": file.content_type or "audio/wav"}
+    try:
+        res = requests.post(HF_WHISPER_MODEL, headers=headers, data=audio_bytes, timeout=120)
+    except requests.RequestException as e:
+        logger.warning("Hugging Face request failed: %s", type(e).__name__)
+        return None, "could not reach Hugging Face"
+    if not res.ok:
+        logger.warning("Hugging Face answered %s", res.status_code)
+        return None, f"Hugging Face answered {res.status_code}"
+    try:
+        return res.json().get("text"), None
+    except ValueError:
+        return None, "Hugging Face sent an unreadable answer"
+
 
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
-    audio_bytes = await file.read()
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    res = requests.post(HF_WHISPER_MODEL, headers=headers, data=audio_bytes)
-    try:
-        text = res.json().get("text")
-    except:
-        text = None
+    text, error = _hf_transcribe(file, await file.read())
+    if error:
+        return JSONResponse({"text": None, "error": error}, status_code=502)
     return {"text": text}
+
 
 @app.post("/transcribe_upload")
 async def transcribe_and_store(file: UploadFile = File(...)):
-    audio_bytes = await file.read()
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    res = requests.post(HF_WHISPER_MODEL, headers=headers, data=audio_bytes)
-    try:
-        text = res.json().get("text")
-    except:
-        text = None
+    text, error = _hf_transcribe(file, await file.read())
+    if error:
+        return JSONResponse({"text": None, "status": "not stored", "error": error}, status_code=502)
 
     stored = False
     if supabase and text:

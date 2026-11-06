@@ -110,6 +110,29 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(res.json()["status"], "not stored")
 
 
+class TranscribeFailureTest(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(new_backend.app, headers={"X-API-Key": "test-key"})
+        patcher = mock.patch.object(new_backend, "API_KEY", "test-key")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_unreachable_hugging_face_is_a_clear_error(self):
+        with mock.patch.object(new_backend.requests, "post",
+                               side_effect=new_backend.requests.ConnectionError("no dns")):
+            res = self.client.post("/transcribe", files={"file": ("a.wav", b"audio")})
+        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.json()["error"], "could not reach Hugging Face")
+
+    def test_hugging_face_refusal_is_a_clear_error(self):
+        with mock.patch.object(new_backend.requests, "post",
+                               return_value=mock.Mock(ok=False, status_code=402)):
+            res = self.client.post("/transcribe_upload", files={"file": ("a.wav", b"audio")})
+        self.assertEqual(res.status_code, 502)
+        self.assertEqual(res.json()["status"], "not stored")
+        self.assertIn("402", res.json()["error"])
+
+
 class AccessTest(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(new_backend.app, follow_redirects=False)
