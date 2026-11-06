@@ -6,9 +6,9 @@ Found after 6 months of silence (last words: `initial push`). First reading 2026
 |---|---|---|
 | Checks passing | 1/1 | 2/2 |
 | Heartbeat | strong | strong |
-| Commit | `542d40b09548` | `344e4e2c39f1` |
+| Commit | `542d40b09548` | `77128a88fc89` |
 
-Surgery since the first reading: 8 files changed, 370 insertions(+), 66 deletions(-)
+Surgery since the first reading: 9 files changed, 478 insertions(+), 84 deletions(-)
 
 ## Checks now
 - ✅ python: compiles
@@ -22,3 +22,6 @@ Surgery since the first reading: 8 files changed, 370 insertions(+), 66 deletion
 - 2026-11-06T18:33 · chat reads discord: 1/2
 - 2026-11-06T18:33 · chat test fixed: 2/2
 - 2026-11-06T18:33 · locked down: 2/2
+- 2026-11-06T19:10 · live fixes: 2/2
+- 2026-11-06T19:20 · gemini transcription: 2/2
+- 2026-11-06T19:20 · audio checks: 2/2
