@@ -24,7 +24,9 @@ class BackendTest(unittest.TestCase):
         self.assertEqual(self.client.get("/health").json(), {"ok": True})
 
     def test_chat_replies_and_saves(self):
-        db = mock.Mock()
+        db = mock.MagicMock()
+        query = db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value
+        query.execute.return_value = mock.Mock(data=[])
         with fake_gemini(), mock.patch.object(new_backend, "supabase", db):
             res = self.client.post("/chat", json={"text": "hi"})
         self.assertEqual(res.json(), {"response": "hello back"})
