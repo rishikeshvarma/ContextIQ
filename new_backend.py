@@ -234,13 +234,15 @@ async def transcribe_and_store(file: UploadFile = File(...)):
     except:
         text = None
 
+    stored = False
     if supabase and text:
         try:
             supabase.table("audio_transcripts").insert({"transcript": text}).execute()
+            stored = True
         except Exception as e:
             logger.warning("Failed to store transcript: %s", e)
 
-    return {"text": text, "status": "stored in db"}
+    return {"text": text, "status": "stored in db" if stored else "not stored"}
 
 # -----------------------------------------------------
 # DISCORD OAUTH + BOT FLOW
@@ -387,7 +389,7 @@ def _insert_messages_rows(guild_id: str, all_messages: List[dict]):
                 "raw": msg
             }).execute()
         except Exception as e:
-            logger.warning("failed insert msg %s: %s", msg.get("id"), e)("failed insert msg %s: %s", msg.get("id"), e)
+            logger.warning("failed insert msg %s: %s", msg.get("id"), e)
 
 
 def _sync_guild_messages(guild_id: str, limit: int = 100):
