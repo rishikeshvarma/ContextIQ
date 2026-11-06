@@ -42,10 +42,36 @@ class BackendTest(unittest.TestCase):
 
     def test_failed_insert_does_not_stop_the_sync(self):
         db = mock.Mock()
-        db.table.return_value.insert.return_value.execute.side_effect = [RuntimeError("bad row"), None]
+        db.table.return_value.upsert.return_value.execute.side_effect = [RuntimeError("bad row"), None]
         with mock.patch.object(new_backend, "supabase", db):
             new_backend._insert_messages_rows("g1", [{"id": "1"}, {"id": "2"}])
-        self.assertEqual(db.table.return_value.insert.call_count, 2)
+        self.assertEqual(db.table.return_value.upsert.call_count, 2)
+
+    def test_repeat_sync_upserts_on_message_id(self):
+        db = mock.Mock()
+        with mock.patch.object(new_backend, "supabase", db):
+            new_backend._insert_messages_rows("g1", [{"id": "1", "content": "x"}])
+        self.assertEqual(db.table.return_value.upsert.call_args.kwargs["on_conflict"], "message_id")
+
+    def test_chat_prompt_includes_saved_discord_messages(self):
+        db = mock.MagicMock()
+        query = db.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value
+        query.execute.return_value = mock.Mock(data=[
+            {"channel_name": "dev", "author_username": "bo", "content": "newest"},
+            {"channel_name": "dev", "author_username": "ana", "content": "launch is friday"},
+        ])
+        with fake_gemini() as model, mock.patch.object(new_backend, "supabase", db):
+            self.client.post("/chat", json={"text": "when is launch?"})
+        prompt = model.return_value.generate_content.call_args.args[0]
+        self.assertIn("#dev ana: launch is friday", prompt)
+        self.assertLess(prompt.index("launch is friday"), prompt.index("newest"))
+
+    def test_chat_still_answers_when_discord_read_fails(self):
+        db = mock.MagicMock()
+        db.table.return_value.select.side_effect = RuntimeError("db down")
+        with fake_gemini(), mock.patch.object(new_backend, "supabase", db):
+            res = self.client.post("/chat", json={"text": "hi"})
+        self.assertEqual(res.json(), {"response": "hello back"})
 
     def test_sync_skips_a_channel_it_cannot_read(self):
         def fake_get(url, headers=None):
